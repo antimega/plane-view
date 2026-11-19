@@ -787,9 +787,11 @@ h1, h2, h3 { font-family: var(--f-display); font-weight: 600; letter-spacing: .0
 .aer .al { position: absolute; transform: translate(-50%, 0); font: 600 11px/1.05 var(--f-body); color: #fff; white-space: nowrap; text-shadow: 0 0 2px #000, 0 0 3px #000; pointer-events: none; max-width: 94%; overflow: hidden; text-overflow: ellipsis; }
 .aer .cap { position: absolute; left: 6px; top: 5px; font: 500 10px/1 var(--f-mono); color: #fff; text-shadow: 0 0 2px #000; }
 @media (max-width: 520px) { .pics { grid-column: 1 / -1; } }
-/* a click on either picture gives both the full width of the entry, one above the other, for a proper look */
+/* a click on either picture gives both the full width of the entry, one above the other, for a proper look:
+   the one clicked on top, so it is the one that grows under the pointer */
 .pics .view, .pics .aer { cursor: zoom-in; }
 .pics.big { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); max-width: 520px; }
+.pics.big.aer-first .aer { order: -1; }
 .pics.big .view, .pics.big .aer { cursor: zoom-out; }
 .pics.big .vl, .pics.big .al { font-size: 13px; }
 .ev .body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -1152,7 +1154,10 @@ td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; text-al
         <div class="pics">${viewHtml(e)}${aerialHtml(e)}</div></li>`;
     }).join('');
     $('#tl').querySelectorAll('.ev').forEach((el) => el.addEventListener('click', () => select(side, +el.dataset.i, false)));
-    $('#tl').querySelectorAll('.pics').forEach((el) => el.addEventListener('click', () => el.classList.toggle('big')));
+    $('#tl').querySelectorAll('.pics').forEach((el) => el.addEventListener('click', (ev) => {
+      const big = el.classList.toggle('big');
+      el.classList.toggle('aer-first', big && !!ev.target.closest('.aer'));
+    }));
   }
   function select(s, i, scroll) {
     if (s !== side) { setSide(s); }
