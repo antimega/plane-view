@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.part
+.DS_Store
+
+# downloaded data (several GB): route library, gazetteers, terrain, imagery tiles
+cache/
+
+# generated: predictions, flight packs and the web page
+out/
+site/
+
+# iOS app: build products and your own signing settings
+ios/build*/
+ios/PlaneViewCore/.build/
+ios/**/xcuserdata/
+ios/Config/Local.xcconfig

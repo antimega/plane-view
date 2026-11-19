@@ -1,0 +1,86 @@
+# The Xcode project for the Plane View app, as an XcodeGen spec. PlaneView.xcodeproj is generated from this and
+# checked in, so Xcode opens it directly; regenerate after adding or removing files:  cd ios && xcodegen
+#
+# Signing is not set here. Config/Config.xcconfig holds neutral defaults and reads your own team and bundle
+# prefix from Config/Local.xcconfig (not checked in): see Config/Local.xcconfig.example.
+name: PlaneView
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "18.0"
+  createIntermediateGroups: true
+fileGroups:
+  - Config/Config.xcconfig
+  - Config/Local.xcconfig.example
+configFiles:
+  Debug: Config/Config.xcconfig
+  Release: Config/Config.xcconfig
+settings:
+  base:
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1,2"
+packages:
+  PlaneViewCore:
+    path: PlaneViewCore
+targets:
+  PlaneView:
+    type: application
+    platform: iOS
+    sources:
+      - PlaneView/App
+      - PlaneView/Views
+      - PlaneView/Shared
+      - PlaneView/Assets.xcassets
+    dependencies:
+      - package: PlaneViewCore
+      - target: PlaneViewWidgets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PLANEVIEW_BUNDLE_PREFIX).planeview
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: PlaneView/Info.plist
+      properties:
+        CFBundleDisplayName: Plane View
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        ITSAppUsesNonExemptEncryption: false
+        NSLocationWhenInUseUsageDescription: Plane View uses GPS to work out where the aircraft is, so it can tell you what is out of your window. Positions stay on this phone.
+        NSPhotoLibraryUsageDescription: Plane View reads the times of photos you took during the flight to tell you where each was taken and what was in view. Nothing leaves this phone.
+        UIBackgroundModes: [location]
+        NSSupportsLiveActivities: true
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: false
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Plane View flight pack
+            LSHandlerRank: Owner
+            LSItemContentTypes: [app.planeview.pack]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: app.planeview.pack
+            UTTypeDescription: Plane View flight pack
+            UTTypeConformsTo: [public.data]
+            UTTypeTagSpecification:
+              public.filename-extension: [planeview]
+  PlaneViewWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - PlaneView/Widget
+      - PlaneView/Shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(PLANEVIEW_BUNDLE_PREFIX).planeview.widgets
+    info:
+      path: PlaneView/Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Plane View
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension

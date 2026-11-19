@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Window Seat Forecast</title>
+<style>/*LEAFLET_CSS*/</style>
+<style>
+/* Layout: flight strip (picker + facts), then a sticky chart column (route map, strip chart along the route)
+   beside the timeline of what to look for from the chosen window; the method follows.
+   Palette: an aeronautical chart (paper, magenta route, survey-blue water) plus the
+   navigation-light colours for the two sides - port (left) red, starboard (right) green. */
+:root {
+  --paper: #F1F2EE; --card: #FFFFFF; --ink: #17202A; --muted: #59646F; --line: #D8DCD8;
+  --chip: #E7EAE4; --track: #B5126B; --water: #2B689B; --mtn: #7B5A39; --hist: #6E7B87;
+  --port: #C2271F; --stbd: #13804A; --ok: #2D7A4C; --warn: #9A6A12; --bad: #B42318;
+  --night: #1F2A44; --twilight: #7D6FA8; --day: #F2D27A; --hl: rgba(181, 18, 107, .10);
+  --relief: none;
+  --f-display: "Barlow Condensed", "Avenir Next Condensed", "Roboto Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --f-body: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0D1217; --card: #141B22; --ink: #E3E8ED; --muted: #94A1AD; --line: #25303A;
+    --chip: #1C252E; --track: #FF5AAE; --water: #7DB9E8; --mtn: #D2A77A; --hist: #8794A0;
+    --port: #FF6B60; --stbd: #4FD08A; --ok: #62C48F; --warn: #E2B04E; --bad: #F2766B;
+    --night: #0A1020; --twilight: #6A5C99; --day: #C9A94F; --hl: rgba(255, 90, 174, .12);
+    --relief: brightness(.5) contrast(1.15) saturate(.65); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0D1217; --card: #141B22; --ink: #E3E8ED; --muted: #94A1AD; --line: #25303A;
+  --chip: #1C252E; --track: #FF5AAE; --water: #7DB9E8; --mtn: #D2A77A; --hist: #8794A0;
+  --port: #FF6B60; --stbd: #4FD08A; --ok: #62C48F; --warn: #E2B04E; --bad: #F2766B;
+  --night: #0A1020; --twilight: #6A5C99; --day: #C9A94F; --hl: rgba(255, 90, 174, .12);
+  --relief: brightness(.5) contrast(1.15) saturate(.65); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font: 400 16px/1.5 var(--f-body); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 1000; background: var(--paper); }
+.wrap { max-width: 1480px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+a { color: var(--water); text-underline-offset: 2px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--track); outline-offset: 2px; border-radius: 3px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; letter-spacing: .01em; text-wrap: balance; margin: 0; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+.L { color: var(--port); } .R { color: var(--stbd); }
+
+/* flight strip */
+.strip { border-bottom: 1px solid var(--line); background: var(--card); }
+.strip .wrap { padding-block: 14px; display: flex; flex-direction: column; gap: 10px; }
+.pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0; }
+.pick dt { font: 600 11px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); min-width: 92px; }
+.pick dd { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.pick a { display: inline-flex; align-items: baseline; gap: 7px; text-decoration: none; color: var(--ink); background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font: 500 14px/18px var(--f-body); }
+.pick a b { font: 600 15px/18px var(--f-display); letter-spacing: .02em; }
+.pick a span { color: var(--muted); font-size: 13px; }
+.pick a:hover { border-color: color-mix(in srgb, var(--track) 50%, var(--line)); }
+.pick a[aria-current="page"] { background: var(--track); border-color: var(--track); color: var(--card); }
+.pick a[aria-current="page"] span { color: color-mix(in srgb, var(--card) 80%, transparent); }
+.titlerow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 28px; }
+.titlerow h1 { font-size: clamp(28px, 4vw, 42px); font-weight: 700; line-height: 1.02; }
+.titlerow h1 small { font-weight: 500; color: var(--muted); font-size: .52em; margin-left: .35em; letter-spacing: .03em; }
+.facts { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; }
+.facts div { display: flex; flex-direction: column; min-width: 0; }
+.facts dt { font: 600 11px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.facts dd { margin: 0; font: 500 15px/1.4 var(--f-mono); font-variant-numeric: tabular-nums; }
+.pdfs { display: flex; flex-wrap: wrap; gap: 8px; font-size: 14px; }
+.pdfs a { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px; text-decoration: none; background: var(--card); }
+.pdfs a i { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+
+/* main grid */
+.grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; padding-block: 18px; }
+.chart { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+#map { height: 56vh; min-height: 320px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); }
+.stripbox { border: 1px solid var(--line); border-radius: 6px; background: var(--card); position: relative; }
+.stripbox svg { display: block; width: 100%; height: 132px; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 3px solid var(--track); vertical-align: middle; margin-right: 6px; }
+.legend i.v2 { border-top: 2px dashed var(--track); }
+.legend i.h { border-top: 1px solid var(--hist); }
+.legend i.dl, .legend i.dr { width: 10px; height: 10px; border: 0; border-radius: 50%; }
+.legend i.dl { background: var(--port); } .legend i.dr { background: var(--stbd); }
+@media (min-width: 1000px) {
+  .grid { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+  .chart { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); height: calc(100vh - 24px); min-height: 560px; }
+  #map { flex: 1; height: auto; }
+}
+
+/* timeline */
+.log { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.sidebar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--card); }
+.seg button { font: 600 15px/1 var(--f-display); letter-spacing: .03em; padding: 9px 14px; border: 0; background: transparent; color: var(--muted); cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
+.seg button i { width: 9px; height: 9px; border-radius: 50%; }
+.seg button[data-side="L"] i { background: var(--port); } .seg button[data-side="R"] i { background: var(--stbd); }
+.seg button[aria-pressed="true"] { background: var(--chip); color: var(--ink); }
+.seg button + button { border-left: 1px solid var(--line); }
+.toggle { font: 500 14px/1 var(--f-body); color: var(--ink); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.toggle input { width: 14px; height: 14px; margin: 0; flex: none; }  /* engines' default checkbox sizes differ by 4 px */
+.summary { color: var(--muted); margin: 0; max-width: 64ch; }
+.summary b { color: var(--ink); font-weight: 600; }
+.tl { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ctx { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 2px 4px; color: var(--muted); font-size: 14px; }
+.ctx .mono { font-size: 13px; text-align: right; }
+.ctx b { font-weight: 500; color: var(--ink); }
+.ev { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 12px; background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--line); border-radius: 6px; padding: 11px 14px 12px 10px; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.ev.L { border-left-color: var(--port); } .ev.R { border-left-color: var(--stbd); }
+.ev:hover { border-color: color-mix(in srgb, var(--track) 45%, var(--line)); }
+.ev.on { border-color: var(--track); box-shadow: 0 0 0 3px var(--hl); }
+.ev .when { min-width: 58px; display: flex; flex-direction: column; align-items: flex-end; font-family: var(--f-mono); font-variant-numeric: tabular-nums; line-height: 1.15; color: var(--muted); font-size: 12px; gap: 3px; }
+.ev .when b { font: 500 21px/1 var(--f-mono); color: var(--ink); white-space: nowrap; }
+.ev .when b small { font-size: 11px; color: var(--muted); margin-left: 1px; }
+/* the window: a rendered view (sprite tile) with vector outlines and labels on top */
+.view { position: relative; width: 100%; aspect-ratio: 4 / 5; max-width: 100%; border-radius: 36% / 29%; overflow: hidden;
+  background-color: var(--chip); box-shadow: 0 0 0 4px var(--chip), 0 0 0 5px var(--line); align-self: start; margin: 4px; }
+.view .tile { position: absolute; inset: 0; background-repeat: no-repeat; }
+.view svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.view .vl { position: absolute; transform: translate(-50%, 0); font: 600 10.5px/1.05 var(--f-body); color: #fff; white-space: nowrap;
+  text-shadow: 0 0 2px #000, 0 0 3px #000; pointer-events: none; max-width: 92%; overflow: hidden; text-overflow: ellipsis; }
+.view .vl.main { font-size: 12px; padding: 1px 4px; border-radius: 3px; text-shadow: none; }
+.view .vl.main.L { background: var(--port); } .view .vl.main.R { background: var(--stbd); }
+.view .nose { position: absolute; top: 6%; font: 600 9.5px/1 var(--f-body); color: #fff; text-shadow: 0 0 2px #000; letter-spacing: .05em; }
+.view.noview { display: grid; place-items: center; font-size: 11px; color: var(--muted); }
+.pics { grid-column: 2; display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr); gap: 12px; align-items: start; max-width: 560px; }
+.pics.solo { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr); }
+.aer { position: relative; width: 100%; aspect-ratio: 1; max-width: 100%; border-radius: 4px; overflow: hidden; background: #28343F; }
+.aer .tile { position: absolute; inset: 0; background-repeat: no-repeat; }
+.aer svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.aer .al { position: absolute; transform: translate(-50%, 0); font: 600 11px/1.05 var(--f-body); color: #fff; white-space: nowrap; text-shadow: 0 0 2px #000, 0 0 3px #000; pointer-events: none; max-width: 94%; overflow: hidden; text-overflow: ellipsis; }
+.aer .cap { position: absolute; left: 6px; top: 5px; font: 500 10px/1 var(--f-mono); color: #fff; text-shadow: 0 0 2px #000; }
+@media (max-width: 520px) { .pics { grid-column: 1 / -1; } }
+/* a click on either picture gives both the full width of the entry, one above the other, for a proper look */
+.pics .view, .pics .aer { cursor: zoom-in; }
+.pics.big { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); max-width: 520px; }
+.pics.big .view, .pics.big .aer { cursor: zoom-out; }
+.pics.big .vl, .pics.big .al { font-size: 13px; }
+.ev .body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ev h3 { font-size: 21px; line-height: 1.1; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; }
+.ev h3 small { font: 400 14px/1.2 var(--f-body); color: var(--muted); }
+.ev .meta { font-size: 14px; color: var(--muted); }
+.ev .meta b { color: var(--ink); font-weight: 500; }
+.ev .also { font-size: 14px; color: var(--muted); }
+.ev .also span { color: var(--ink); }
+.ev .also i { font-style: normal; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.conf { font: 500 11px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .05em; padding: 3px 6px; border-radius: 3px; }
+.conf.likely { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.conf.possible { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.conf.lucky { color: var(--muted); background: color-mix(in srgb, var(--muted) 14%, transparent); }
+.night { font: 500 11px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .05em; color: var(--card); background: var(--night); padding: 3px 6px; border-radius: 3px; }
+
+/* reference sections */
+.ref { display: flex; flex-direction: column; gap: 28px; padding-block: 10px 48px; }
+.ref section { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+[hidden] { display: none !important; }  /* display rules like the one above would otherwise un-hide */
+.ref h2 { font-size: 26px; }
+.ref p { margin: 0; max-width: 72ch; }
+.stats { display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.stats div { display: flex; flex-direction: column; }
+.stats dt { font: 600 11px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.stats dd { margin: 0; font: 600 26px/1.15 var(--f-display); }
+.stats dd small { font: 400 14px var(--f-body); color: var(--muted); margin-left: 4px; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font: 600 11px/1.2 var(--f-body); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.st { font: 500 11px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .05em; padding: 3px 6px; border-radius: 3px; }
+.st.headline { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.st.also, .st.context { color: var(--water); background: color-mix(in srgb, var(--water) 14%, transparent); }
+.st.candidate { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.st.missed { color: var(--bad); background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.method { columns: 2 340px; column-gap: 32px; }
+.method p { break-inside: avoid; margin: 0 0 10px; }
+.src { font-size: 13px; color: var(--muted); }
+
+/* map */
+.leaflet-container { font-family: var(--f-body); background: var(--paper); }
+.leaflet-image-layer { filter: var(--relief); }
+.lbl { font: 500 11px/1.1 var(--f-body); color: var(--ink); white-space: nowrap; text-shadow: 0 0 3px var(--paper), 0 0 3px var(--paper), 0 0 2px var(--paper); pointer-events: none; }
+.lbl.city { color: var(--muted); font-size: 10.5px; }
+.lbl.evl { font-weight: 600; font-size: 11.5px; }
+.lbl.tick { font: 500 10px/1 var(--f-mono); color: var(--track); }
+.tip { font: 400 13px/1.35 var(--f-body); max-width: 260px; }
+.tip b { font-family: var(--f-display); font-size: 16px; font-weight: 600; }
+.leaflet-tooltip { background: var(--card); color: var(--ink); border-color: var(--line); }
+.loading { opacity: .45; transition: opacity .2s; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+@media (max-width: 520px) {
+  .ev { grid-template-columns: max-content minmax(0, 1fr); gap: 9px; padding-right: 10px; }
+  .ev .when { min-width: 46px; }
+  .ev .when b { font-size: 18px; }
+  .ctx { grid-template-columns: 52px minmax(0, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<header class="strip">
+  <div class="wrap">
+    <dl class="pick" id="pick"></dl>
+    <div class="titlerow"><h1 id="h1">Window Seat Forecast</h1><dl class="facts" id="facts"></dl></div>
+    <div class="pdfs" id="pdfs"></div>
+  </div>
+</header>
+
+<main class="wrap grid" id="main">
+  <section class="chart" aria-label="Route">
+    <div id="map" role="region" aria-label="Map of the likely routes and what can be seen"></div>
+    <div class="legend" id="legend"></div>
+    <div class="stripbox"><svg id="strip" role="img" aria-label="Flight profile: daylight, height, and when each sighting comes, left window above and right window below"></svg></div>
+  </section>
+  <section class="log" aria-label="What to look for">
+    <div class="sidebar">
+      <div class="seg" id="seg" role="group" aria-label="Window side"></div>
+      <label class="toggle"><input type="checkbox" id="likely-only"> Likely only</label>
+    </div>
+    <p class="summary" id="summary"></p>
+    <ol class="tl" id="tl"></ol>
+  </section>
+</main>
+
+<div class="wrap ref">
+  <section id="method">
+    <h2>How the forecast is made</h2>
+    <div class="method">
+      <p><b>Routes.</b> Every flight between the same two airports on the sampled days, from adsb.lol's open ADS-B archive. Each past flight counts as one way this flight could go; flights with the same callsign count three times (airlines often fly a number under another callsign, so the airline's usual callsign at that takeoff time stands in), the same airline twice, the same time of day half as much again. Long flights that leave ADS-B coverage over oceans or Siberia are joined along the great circle, and a departure whose arrival fell on a day not in the library is joined to an arrival of the same callsign from another day. With fewer than three flights, departures and arrivals from nearby airports are spliced in. Routes are grouped into variants by runway and path; the map shows each variant's most typical flight.</p>
+      <p><b>What can be seen.</b> Places, peaks, lakes, islands, coasts, rivers and landmarks from GeoNames, Natural Earth and Wikidata along the corridor. From each point of each past flight: distance, direction from the nose, angle below the horizon (with the Earth's curvature and refraction), apparent size and haze. The window's field of view and the ranges at which things are recognisable were calibrated on window photographs from six flights (231 solved camera directions, 967 named features).</p>
+      <p><b>Chance of seeing it.</b> The share of past flights from which it was in view and recognisable, with daylight (at night lit towns, floodlit landmarks and airports count, and parks and water where they make a dark gap in a big city's lights). Sightings in the second half of the flight also give the time before landing, which holds better than the time since takeoff when the cruise runs fast or slow. A clear view is assumed; when the flight is within Open-Meteo's 15-day forecast, the cloud outlook is shown above but does not change the chances. <b>Likely</b> is 55% or more, <b>possible</b> 25–55%, <b>if lucky</b> below.</p>
+      <p><b>From above.</b> Beside each window view is a satellite image of the place from straight above (Sentinel-2 cloudless, 10 m), sized to it and turned to the way you will be looking: you are below the bottom edge, so left and right in the picture are left and right in the window. A town's shape against its coast or river is often what makes it recognisable. The dashed line is the likely route, the white arrow at the bottom is you, and the N marker shows where north is. The route map itself is always north-up.</p>
+      <p><b>The window views.</b> Each sighting has a view rendered from where the aircraft is predicted to be: every pixel is traced to the ground on the Copernicus elevation model (or the sea, with the Earth's curvature), so the skyline is the real one and ridges hide what is behind them, and is then coloured from the satellite picture of that spot (Sentinel-2 cloudless), shaded by the slope, with snow above the season's snowline and a little haze with distance - the same construction as a tilted Google Earth view. The imagery is a cloud-free summer mosaic, so fields and woods will not be in the day's colours, and at night only the towns' lights are drawn. Coastlines, lake shores, rivers and borders are drawn on top, and the sighting is labelled in its side's colour. Times are minutes after takeoff with an estimated clock time; "2 o'clock" counts from the nose, as pilots do.</p>
+    </div>
+    <p class="src" id="sources"></p>
+  </section>
+</div>
+
+<script src="leaflet.js"></script>
+<script src="flights.js"></script>
+<script>
+(async function () {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const fmtMin = (m) => { m = Math.round(m); return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`; };
+  let store = {};
+  try { store = JSON.parse(localStorage.getItem('wsf') || '{}'); } catch (e) { store = {}; }
+  const save = () => { try { localStorage.setItem('wsf', JSON.stringify(store)); } catch (e) {} };
+
+  // The data arrives as scripts (flights.js, f/<id>/data.js), not by fetch(), so that the page also works when it is
+  // opened straight from a folder (file://), where browsers refuse fetch().
+  const flights = window.PV_FLIGHTS || [];
+  if (!flights.length) { document.querySelector('#h1').textContent = 'No flights yet: run planeview predict'; return; }
+  const loadData = (id) => new Promise((resolve, reject) => {
+    window.PV_DATA = window.PV_DATA || {};
+    if (window.PV_DATA[id]) return resolve(window.PV_DATA[id]);
+    const el = document.createElement('script');
+    el.src = `f/${id}/data.js`;
+    el.onload = () => resolve(window.PV_DATA[id]);
+    el.onerror = () => reject(new Error(`f/${id}/data.js is missing`));
+    document.head.appendChild(el);
+  });
+  let D = null, side = null, map = null, layers = null, evIndex = {};
+
+  function picker(cur) {
+    const groups = [['Flights', flights]];
+    $('#pick').innerHTML = groups.filter((g) => g[1].length).map(([t, fs]) =>
+      `<dt>${t}</dt><dd>${fs.map((f) => `<a href="#${f.hash}" ${f.id === cur ? 'aria-current="page"' : ''}><b>${esc(f.number || f.route)}</b><span>${f.number ? esc(f.route) + ' · ' : ''}${esc(f.date_label)}</span></a>`).join('')}</dd>`).join('');
+  }
+
+  function clock(tmin) {
+    const t0 = Date.parse(D.flight.takeoff_utc);
+    const d = new Date(t0 + tmin * 60000);
+    try {
+      return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: D.flight.orig.tz });
+    } catch (e) { return d.toISOString().slice(11, 16); }
+  }
+
+  function header() {
+    const f = D.flight;
+    $('#h1').innerHTML = `${esc(f.number || '')} ${esc(f.orig.city || f.orig.code)} → ${esc(f.dest.city || f.dest.code)}<small>${esc(new Date(f.date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }))}</small>`;
+    const seat = f.seat && f.seat.seat ? `${f.seat.seat} (${f.seat.side === 'L' ? 'left' : f.seat.side === 'R' ? 'right' : 'middle'})` : (f.seat && f.seat.side ? (f.seat.side === 'L' ? 'left window' : 'right window') : 'both sides');
+    const facts = [
+      ['Takeoff', `≈ ${f.takeoff_local} ${f.orig.code}`],
+      ['Flight time', `≈ ${fmtMin(f.duration_min)}`],
+      ['Aircraft', f.aircraft_name || '—'],
+      ['Seat', seat],
+      ['Route history', `${D.stats.legs} past flights`],
+      ['Cloud', /outlook: (\d+)%/.test(D.sources.weather || '') ? `forecast ${D.sources.weather.match(/outlook: (\d+)%/)[1]}% clear` : 'clear view assumed'],
+    ];
+    $('#facts').innerHTML = facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('');
+    $('#pdfs').innerHTML = Object.entries(D.pdfs || {}).map(([s, p]) =>
+      `<a href="f/${D.id}/${p}" target="_blank" rel="noopener" class="${s}"><i></i>Window guide, ${s === 'L' ? 'left' : 'right'} side (PDF)</a>`).join('');
+    $('#sources').textContent = (D.imagery_attribution ? `Overhead imagery: ${D.imagery_attribution}, CC BY-NC-SA 4.0. ` : '') + `Sources: routes ${D.sources.route} (${D.sources.tracks}; days ${D.sources.days.join(', ')}${D.sources.excluded_days && D.sources.excluded_days.length ? '; left out: ' + D.sources.excluded_days.join(', ') : ''}). Filed routes: ${D.sources.filed}. Weather: ${D.sources.weather}. Places: ${D.sources.gazetteer}. Terrain: Copernicus DEM GLO-90 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the European Union and ESA. Takeoff time: ${D.flight.takeoff_source}. Generated ${D.flight.date}.`;
+  }
+
+  // ---------------------------------------------------------------- map (CRS.Simple, km in the route projection)
+  function drawMap() {
+    if (map) { map.remove(); map = null; }
+    const [x0, y0, x1, y1] = D.bounds;
+    const CRS = L.extend({}, L.CRS.Simple, { transformation: new L.Transformation(1, -x0, -1, y1) });
+    map = L.map('map', { crs: CRS, zoomSnap: 0.25, minZoom: -7, maxZoom: 5, attributionControl: false, preferCanvas: true });
+    const B = [[y0, x0], [y1, x1]];
+    const F = D.fit ? [[D.fit[1], D.fit[0]], [D.fit[3], D.fit[2]]] : B;
+    map.fitBounds(F, { padding: [6, 6] });
+    map.setMaxBounds(L.latLngBounds(B).pad(0.1));
+    map.on('zoomend moveend', declutter);
+    L.imageOverlay(`f/${D.id}/relief.jpg`, B).addTo(map);
+    layers = { vec: L.layerGroup().addTo(map), hist: L.layerGroup().addTo(map), vars: L.layerGroup().addTo(map),
+               ev: L.layerGroup().addTo(map), lbl: L.layerGroup().addTo(map) };
+    style();
+  }
+  const ll = (p) => [p[1], p[0]];
+  function style() {
+    if (!map) return;
+    Object.values(layers).forEach((g) => g.clearLayers());
+    const water = css('--water'), ink = css('--ink'), muted = css('--muted'), track = css('--track'), hist = css('--hist');
+    const V = D.vec;
+    V.coast.forEach((l) => L.polyline(l.map(ll), { color: water, weight: 0.8, opacity: 0.8, interactive: false }).addTo(layers.vec));
+    V.lakes.forEach((l) => L.polyline(l.map(ll), { color: water, weight: 0.7, opacity: 0.7, interactive: false }).addTo(layers.vec));
+    V.rivers.forEach((l) => L.polyline(l.map(ll), { color: water, weight: 0.6, opacity: 0.5, interactive: false }).addTo(layers.vec));
+    V.borders.forEach((l) => L.polyline(l.map(ll), { color: muted, weight: 0.8, opacity: 0.6, dashArray: '4 3', interactive: false }).addTo(layers.vec));
+    V.places.slice().sort((a, b) => a.r - b.r).forEach((p) => {
+      const m = L.marker([p.y, p.x], { interactive: false, icon: L.divIcon({ className: 'lbl city', html: esc(p.n), iconSize: null, iconAnchor: [-4, 6] }) });
+      m.prio = 10 + p.r; m.text = p.n; m.addTo(layers.lbl);
+    });
+    D.history.forEach((h) => L.polyline(h.xy.map(ll), { color: hist, weight: 1, opacity: 0.35, interactive: false }).addTo(layers.hist));
+    D.variants.slice().reverse().forEach((v, i) => {
+      const main = v.id === 'V1';
+      L.polyline(v.xy.map(ll), { color: track, weight: main ? 3.2 : 2, opacity: main ? 0.95 : 0.6, dashArray: main ? null : '6 5' })
+        .bindTooltip(`<div class="tip"><b>Route ${v.id}</b> · ${Math.round(v.p * 100)}% of past flights<br>${v.n} flights${v.dep_rwy ? ', departing runway ' + esc(v.dep_rwy) : ''}${v.arr_rwy ? ', landing runway ' + esc(v.arr_rwy) : ''}</div>`, { sticky: true })
+        .addTo(layers.vars);
+    });
+    const v1 = D.variants[0];
+    if (v1) {
+      let next;
+      const stepT = (D.flight.duration_min || 120) > 300 ? 60 : 30;
+      next = stepT;
+      v1.xy.forEach((p) => { if (p[2] >= next) { const m = L.marker([p[1], p[0]], { interactive: false, icon: L.divIcon({ className: 'lbl tick', html: `+${next}`, iconSize: null, iconAnchor: [-5, 5] }) }); m.prio = 1; m.text = `+${next}`; m.addTo(layers.lbl); next += stepT; } });
+    }
+    drawEvents();
+  }
+  function drawEvents() {
+    layers.ev.clearLayers();
+    evIndex = {};
+    const sides = D.flight.sides;
+    const rank = (D.events[side] || []).map((e, i) => [e.score, i]).sort((a, b) => b[0] - a[0]).map((x) => x[1]);
+    const topIds = new Set(rank.slice(0, 16));
+    sides.filter((s) => s !== side).concat([side]).forEach((s) => {
+      const col = css(s === 'L' ? '--port' : '--stbd');
+      const active = s === side;
+      (D.events[s] || []).forEach((e, i) => {
+        if (active && likelyOnly() && e.confidence !== 'likely') return;
+        const m = L.circleMarker([e.y, e.x], { radius: active ? 4 : 2, color: active ? css('--card') : col, weight: active ? 1 : 0,
+          fillColor: col, fillOpacity: active ? 0.9 : 0.35 })
+          .bindTooltip(`<div class="tip"><b>${esc(e.name)}</b><br>+${Math.round(e.t)} min · ${esc(e.what)}<br>${esc(e.where)}</div>`)
+          .on('click', () => select(s, i, true)).addTo(layers.ev);
+        if (active) evIndex[i] = m;
+        if (active && topIds.has(i)) {
+          const lm = L.marker([e.y, e.x], { interactive: false, icon: L.divIcon({ className: 'lbl evl', html: esc(e.name), iconSize: null, iconAnchor: [-6, 7] }) });
+          lm.prio = 2 + rank.indexOf(i) / 100; lm.text = e.name; lm.addTo(layers.ev);
+        }
+      });
+    });
+    declutter();
+  }
+  // hide labels that would overlap a more important one (route ticks, then sightings by score, then cities by size)
+  function declutter() {
+    if (!map) return;
+    const ms = [];
+    [layers.lbl, layers.ev].forEach((g) => g.eachLayer((m) => { if (m.text !== undefined && m.getElement) ms.push(m); }));
+    ms.sort((a, b) => a.prio - b.prio);
+    const kept = [];
+    const z = map.getZoom();
+    ms.forEach((m) => {
+      const el = m.getElement();
+      if (!el) return;
+      const p = map.latLngToContainerPoint(m.getLatLng());
+      const w = m.text.length * 6.3 + 8, h = 14;
+      const r = { x0: p.x + 4, y0: p.y - 8, x1: p.x + 4 + w, y1: p.y - 8 + h };
+      const clash = kept.some((k) => r.x0 < k.x1 && r.x1 > k.x0 && r.y0 < k.y1 && r.y1 > k.y0);
+      const tooSmall = m.prio >= 10 && m.prio - 10 > 2 + (z + 3) * 1.2;
+      el.style.display = clash || tooSmall ? 'none' : '';
+      if (!clash && !tooSmall) kept.push(r);
+    });
+  }
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { style(); drawStrip(); });
+  new MutationObserver(() => { style(); drawStrip(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  // ---------------------------------------------------------------- strip chart
+  function drawStrip() {
+    if (!D) return;
+    const svg = $('#strip');
+    const W = svg.clientWidth || 600, H = 132;
+    const padL = 46, padR = 12;
+    const T = D.flight.duration_min || 120;
+    const X = (t) => padL + (W - padL - padR) * Math.max(0, Math.min(1, t / T));
+    const muted = css('--muted'), line = css('--line');
+    const yDay = 6, yL = 32, yAlt0 = 92, yAlt1 = 50, yR = 108;
+    let s = `<rect x="0" y="0" width="${W}" height="${H}" fill="${css('--card')}"/>`;
+    // daylight band
+    const sun = D.sun;
+    for (let i = 0; i < sun.length - 1; i++) {
+      const e = sun[i][1];
+      const c = e >= 0 ? css('--day') : e >= -6 ? css('--twilight') : css('--night');
+      s += `<rect x="${X(sun[i][0]).toFixed(1)}" y="${yDay}" width="${Math.max(0.5, X(sun[i + 1][0]) - X(sun[i][0]) + 0.5).toFixed(1)}" height="7" fill="${c}"/>`;
+    }
+    s += `<text x="${padL - 6}" y="${yDay + 7}" text-anchor="end" style="font:10px var(--f-body);fill:${muted}">light</text>`;
+    // height profile of the most likely route
+    const alt = D.v1_strip;
+    if (alt.length) {
+      const amax = Math.max(...alt.map((a) => a[1]), 10000);
+      const Y = (a) => yAlt0 - (a / amax) * (yAlt0 - yAlt1);
+      let p = `M${X(0)},${yAlt0}`;
+      alt.forEach((a) => { p += `L${X(a[0]).toFixed(1)},${Y(a[1]).toFixed(1)}`; });
+      p += `L${X(alt[alt.length - 1][0])},${yAlt0}Z`;
+      s += `<path d="${p}" fill="${css('--chip')}" stroke="${css('--track')}" stroke-width="1.2"/>`;
+      s += `<text x="${padL - 6}" y="${yAlt1 + 4}" text-anchor="end" style="font:10px var(--f-mono);fill:${muted}">${Math.round(amax / 1000)}k ft</text>`;
+    }
+    // grid every 30 or 60 min; labels ("+120 min" is ~48 px) only as often as the width allows
+    const grid = T > 300 ? 60 : 30, pxMin = (W - padL - padR) / T;
+    const lab = [30, 60, 120, 180, 240, 360].find((st) => st >= grid && st * pxMin >= 58) || 480;
+    for (let t = 0; t <= T; t += grid) {
+      s += `<line x1="${X(t)}" x2="${X(t)}" y1="${yDay + 10}" y2="${H - 14}" stroke="${line}" stroke-width="1"/>`;
+      if (t % lab === 0 && X(t) + 26 <= W)
+        s += `<text x="${X(t)}" y="${H - 3}" text-anchor="middle" style="font:10px var(--f-mono);fill:${muted}">${t ? '+' + t + ' min' : 'takeoff'}</text>`;
+    }
+    s += `<text x="${padL - 6}" y="${yL + 4}" text-anchor="end" style="font:600 10px var(--f-body);fill:${css('--port')}">LEFT</text>`;
+    s += `<text x="${padL - 6}" y="${yR + 4}" text-anchor="end" style="font:600 10px var(--f-body);fill:${css('--stbd')}">RIGHT</text>`;
+    D.flight.sides.forEach((sd) => {
+      const col = css(sd === 'L' ? '--port' : '--stbd');
+      const y = sd === 'L' ? yL : yR;
+      (D.events[sd] || []).forEach((e, i) => {
+        if (sd === side && likelyOnly() && e.confidence !== 'likely') return;
+        const on = sd === side;
+        const r = on ? 2.5 + Math.min(3, e.score) : 2.2;
+        s += `<circle data-s="${sd}" data-i="${i}" cx="${X(e.t).toFixed(1)}" cy="${y}" r="${r.toFixed(1)}" fill="${col}" fill-opacity="${on ? 0.85 : 0.3}" style="cursor:pointer"><title>${esc(e.name)} · +${Math.round(e.t)} min · ${esc(e.what)}</title></circle>`;
+      });
+    });
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.innerHTML = s;
+    svg.querySelectorAll('circle[data-i]').forEach((c) => c.addEventListener('click', () => select(c.dataset.s, +c.dataset.i, true)));
+  }
+
+  // ---------------------------------------------------------------- timeline
+  const likelyOnly = () => $('#likely-only').checked;
+  function viewHtml(e) {
+    const v = e.view, V = D.views && D.views[e.side];
+    if (!v || !V || v.error) return `<div class="view noview">no view</div>`;
+    const col = v.tile % V.cols, row = Math.floor(v.tile / V.cols);
+    const bx = V.cols > 1 ? (col / (V.cols - 1)) * 100 : 0, by = V.rows > 1 ? (row / (V.rows - 1)) * 100 : 0;
+    const tile = `<div class="tile" style="background-image:url('f/${D.id}/${V.file}');background-size:${V.cols * 100}% ${V.rows * 100}%;background-position:${bx}% ${by}%"></div>`;
+    const P = (ln) => ln.map((p) => `${p[0]},${p[1]}`).join(' ');
+    const lines = [['coast', '#FFFFFF', 0.9, ''], ['lakes', '#D7ECFF', 0.8, ''], ['rivers', '#A9D3F5', 0.7, ''], ['borders', '#FFE08A', 0.8, '3 2']]
+      .map(([k, c, w, da]) => (v[k] || []).map((ln) => `<polyline points="${P(ln)}" fill="none" stroke="${c}" stroke-width="${w}" ${da ? `stroke-dasharray="${da}"` : ''} vector-effect="non-scaling-stroke" opacity="0.9"/>`).join('')).join('');
+    const marks = (v.labels || []).map((l) => `<circle cx="${l.x}" cy="${l.y}" r="${l.main ? 2.2 : 1.1}" fill="${l.main ? 'none' : '#fff'}" stroke="${l.main ? '#fff' : 'none'}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`).join('');
+    const lbls = (v.labels || []).map((l) => `<span class="vl ${l.main ? 'main ' + e.side : ''}" style="left:${Math.min(80, Math.max(20, l.x))}%;top:${Math.min(92, l.y + 2.2)}%">${esc(l.n)}</span>`).join('');
+    const nose = e.side === 'L' ? `<span class="nose" style="right:9%">NOSE ›</span>` : `<span class="nose" style="left:9%">‹ NOSE</span>`;
+    return `<div class="view" role="img" aria-label="Rendered view from the window towards ${esc(e.name)}">${tile}<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${lines}${marks}</svg>${lbls}${nose}</div>`;
+  }
+  function aerialHtml(e) {
+    const a = e.aerial, A = D.aerial && D.aerial[e.side];
+    if (!a || !A || a.error) return '<div></div>';
+    const col = a.tile % A.cols, row = Math.floor(a.tile / A.cols);
+    const bx = A.cols > 1 ? (col / (A.cols - 1)) * 100 : 0, by = A.rows > 1 ? (row / (A.rows - 1)) * 100 : 0;
+    const tile = `<div class="tile" style="background-image:url('f/${D.id}/${A.file}');background-size:${A.cols * 100}% ${A.rows * 100}%;background-position:${bx}% ${by}%"></div>`;
+    const route = (a.route || []).map((ln) => `<polyline points="${ln.map((p) => p.join(',')).join(' ')}" fill="none" stroke="#FF5AAE" stroke-width="1.6" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`).join('');
+    const lk = a.look;
+    // the picture is turned to the way you look: you are below the bottom edge, looking up it
+    const eye = `<g transform="translate(${lk.x},${lk.y})"><path d="M0,-6 L4,3 L0,1 L-4,3 z" fill="#fff" stroke="#000" stroke-width="0.4"/></g>`;
+    const ring = `<circle cx="50" cy="50" r="4" fill="none" stroke="#fff" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`;
+    const north = `<g transform="translate(86,15)"><circle r="8" fill="rgba(0,0,0,.35)"/><text y="2.4" text-anchor="middle" style="font:700 6.5px sans-serif;fill:#fff">N</text><g transform="rotate(${-lk.up})"><path d="M0,-13 L2.3,-6.2 L0,-7.6 L-2.3,-6.2 z" fill="#fff" stroke="#000" stroke-width="0.4"/></g></g>`;
+    const lbls = (a.labels || []).map((l) => `<span class="al" style="left:${Math.min(78, Math.max(22, l.x))}%;top:${Math.min(88, l.y + (l.main ? 5 : 2.5))}%">${esc(l.n)}</span>`).join('');
+    return `<div class="aer" role="img" aria-label="Satellite view of ${esc(e.name)} from above, turned to the way you look (${lk.compass}), ${a.km} km across">${tile}<svg viewBox="0 0 100 100" aria-hidden="true">${route}${ring}${eye}${north}</svg>${lbls}<span class="cap">from above, as you face it<br>${a.km} km across</span></div>`;
+  }
+  function renderTimeline() {
+    const evs = (D.events[side] || []).map((e, i) => ({ e, i })).filter(({ e }) => !likelyOnly() || e.confidence === 'likely');
+    const ctx = D.context.filter((c) => !c.side || c.side === side);
+    const items = [...evs.map((x) => ({ t: x.e.t, ev: x })), ...ctx.map((c) => ({ t: c.t, c }))].sort((a, b) => a.t - b.t);
+    const n = (D.events[side] || []).length, nl = (D.events[side] || []).filter((e) => e.confidence === 'likely').length;
+    $('#summary').innerHTML = `<b>${n} things to look for</b> from the ${side === 'L' ? 'left' : 'right'}-hand window, <b>${nl} likely</b>. ${esc((D.flight.seat && D.flight.seat.note) || '')}`;
+    $('#tl').innerHTML = items.map((it) => {
+      if (it.c) return `<li class="ctx"><span class="mono">+${Math.round(it.c.t)}</span><span><b>${esc(it.c.text)}</b>${it.c.t_end ? ` <span class="mono">to +${Math.round(it.c.t_end)}</span>` : ''}</span></li>`;
+      const { e, i } = it.ev;
+      const conf = e.confidence === 'likely' ? 'likely' : e.confidence === 'possible' ? 'possible' : 'lucky';
+      const win = e.t_hi - e.t_lo >= 2 ? `${Math.round(e.t_lo)}–${Math.round(e.t_hi)}` : '';
+      const kw = (a) => a.kind === 'settlement' ? '' : ` <i>(${esc(a.what.split(',')[0])})</i>`;
+      const also = e.also && e.also.length ? `<div class="also">Also: ${e.also.map((a) => `<span>${esc(a.name)}</span>${kw(a)}`).join(', ')}</div>` : '';
+      return `<li class="ev ${e.side}" id="ev-${i}" data-i="${i}">
+        <div class="when"><b>+${Math.round(e.t)}<small>min</small></b><span>≈ ${clock(e.t)}</span>${win ? `<span>${win}</span>` : ''}${e.anchor === 'landing' && e.t_end != null ? `<span class="land" title="minutes before landing">${Math.round(e.t_end)} min<br>to land</span>` : ''}</div>
+        <div class="body"><h3>${esc(e.name)}${e.local ? `<small>${esc(e.local)}</small>` : ''}</h3>
+          <div class="meta">${esc(e.what)} · <b>${Math.round(e.d_km)} km</b> · ${esc(e.where)} · <b>${esc(e.clock)}</b></div>
+          ${also}
+          <div class="chips"><span class="conf ${conf}">${esc(e.confidence)} ${Math.round(e.p_see * 100)}%</span>${e.light === 'night' ? `<span class="night">${e.night_as === 'dark' ? 'dark gap in the lights' : 'lights'}</span>` : ''}</div></div>
+        <div class="pics">${viewHtml(e)}${aerialHtml(e)}</div></li>`;
+    }).join('');
+    $('#tl').querySelectorAll('.ev').forEach((el) => el.addEventListener('click', () => select(side, +el.dataset.i, false)));
+    $('#tl').querySelectorAll('.pics').forEach((el) => el.addEventListener('click', () => el.classList.toggle('big')));
+  }
+  function select(s, i, scroll) {
+    if (s !== side) { setSide(s); }
+    document.querySelectorAll('.ev.on').forEach((el) => el.classList.remove('on'));
+    const el = document.getElementById('ev-' + i);
+    if (el) { el.classList.add('on'); if (scroll) el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }
+    const e = D.events[s][i];
+    if (e && map) {
+      const m = evIndex[i];
+      if (m) m.openTooltip();
+      map.panTo([e.y, e.x]);
+    }
+  }
+  function setSide(s) {
+    side = s;
+    store.side = s; save();
+    document.querySelectorAll('#seg button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.side === s ? 'true' : 'false'));
+    renderTimeline(); if (map) drawEvents(); drawStrip();
+  }
+
+  // ---------------------------------------------------------------- load
+  async function load(id) {
+    const f = flights.find((x) => x.hash === id || x.id === id) || flights[0];
+    picker(f.id);
+    document.body.classList.add('loading');
+    D = await loadData(f.id);
+    document.body.classList.remove('loading');
+    header();
+    const sides = D.flight.sides;
+    $('#seg').innerHTML = sides.map((s) => `<button type="button" data-side="${s}" aria-pressed="false"><i></i>${s === 'L' ? 'Left window' : 'Right window'}</button>`).join('');
+    $('#seg').querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setSide(b.dataset.side)));
+    const pref = (D.flight.seat && D.flight.seat.side) || store.side;
+    side = sides.includes(pref) ? pref : sides[0];
+    $('#legend').innerHTML = `<span><i></i>Most likely route</span><span><i class="v2"></i>Other routes</span><span><i class="h"></i>Past flights</span><span><i class="dl"></i>Left window</span><span><i class="dr"></i>Right window</span>`;
+    drawMap();
+    setSide(side);
+  }
+  $('#likely-only').addEventListener('change', () => { renderTimeline(); drawEvents(); drawStrip(); });
+  // after layout, with the chart's new width (a window 'resize' handler can read the old one)
+  let stripW = 0;
+  new ResizeObserver(([en]) => { const w = Math.round(en.contentRect.width); if (w !== stripW) { stripW = w; drawStrip(); } }).observe($('#strip'));
+  window.addEventListener('hashchange', () => load(location.hash.slice(1)));
+  window.__wsf = () => ({ map, D, side });
+  load(location.hash.slice(1));
+})();
+</script>
+</body>
+</html>

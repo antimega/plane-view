@@ -1,0 +1,33 @@
+[project]
+name = "plane-view"
+version = "0.3.0"
+description = "Forecast what you will see from an aircraft window seat, as a web page, PDF guides and packs for the Plane View app"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "numpy",
+  "pillow",
+  "pyshp",
+  "shapely>=2",
+  "scipy",
+  "tifffile",
+  "imagecodecs",
+  "orjson",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.scripts]
+planeview = "planeview.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["planeview"]

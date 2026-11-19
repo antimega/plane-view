@@ -1,0 +1,8 @@
+// Copy this file to Local.xcconfig and fill in your own values.
+//
+// DEVELOPMENT_TEAM: the 10-character Team ID of your Apple developer account
+//   (developer.apple.com/account > Membership details; a free Apple ID has one too, shown in Xcode's Signing pane).
+// PLANEVIEW_BUNDLE_PREFIX: a reverse-domain prefix that is yours; the app becomes <prefix>.planeview.
+
+DEVELOPMENT_TEAM = ABCDE12345
+PLANEVIEW_BUNDLE_PREFIX = com.yourname

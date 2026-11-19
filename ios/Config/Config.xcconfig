@@ -1,0 +1,10 @@
+// Identity and signing for the Plane View app.
+//
+// These defaults build and run in the iOS Simulator as they are. To run on your own iPhone or iPad, copy
+// Local.xcconfig.example to Local.xcconfig and put your Apple developer team and a bundle prefix of your own in it.
+// Local.xcconfig is not checked in.
+
+PLANEVIEW_BUNDLE_PREFIX = com.example
+DEVELOPMENT_TEAM =
+
+#include? "Local.xcconfig"
